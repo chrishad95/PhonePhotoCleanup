@@ -172,18 +172,21 @@ else
     media_find "%s\t%p\n" |
     sort -nr |
     head -500 |
-    awk -F'\t' '
+    awk -F'\t' -v dir="$PHOTO_DIR/" '
     function human(b,   i, u) {
         split("B K M G T", u, " ")
         for (i = 1; b >= 1024 && i < 5; i++) b /= 1024
         return sprintf("%.1f%s", b, u[i])
     }
-    { printf "%s\t%s\n", human($1), $2 }' |
+    { printf "%s\t%s\t%s\n", human($1), substr($2, length(dir) + 1), $2 }' |
     fzf --multi \
+        --layout=reverse \
         --delimiter=$'\t' \
-        --header="Tab = mark, Enter = save marked files to $LIST, Esc = cancel" \
-        --preview='if command -v chafa >/dev/null 2>&1; then chafa -s 40x20 {2} 2>/dev/null; else ls -l {2}; fi' |
-    cut -f2 > "$LIST.tmp"
+        --with-nth=1,2 \
+        --header="Tab=mark  Enter=save list  Esc=cancel" \
+        --preview-window=down:40%:wrap \
+        --preview='ls -lh {3}; case {3} in *.[jJ][pP][gG]|*.[jJ][pP][eE][gG]|*.[pP][nN][gG]) command -v chafa >/dev/null 2>&1 && chafa -s 40x20 {3} 2>/dev/null;; esac' |
+    cut -f3 > "$LIST.tmp"
 
     if [ -s "$LIST.tmp" ]; then
         mv "$LIST.tmp" "$LIST"
