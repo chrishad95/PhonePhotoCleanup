@@ -9,6 +9,15 @@ pause() {
     read -p "Press Enter to continue..."
 }
 
+# Lists photo/video files with a printf format, e.g. media_find "%s\t%p\n"
+media_find() {
+    find "$PHOTO_DIR" \
+        -type f \
+        \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \
+           -o -iname "*.heic" -o -iname "*.mp4" -o -iname "*.mov" \) \
+        -printf "$1"
+}
+
 while true
 do
 clear
@@ -22,7 +31,9 @@ echo "3) Find photos older than N years"
 echo "4) Find duplicate photos"
 echo "5) Archive old photos"
 echo "6) Delete files from a list"
-echo "7) Exit"
+echo "7) Photos by year and month"
+echo "8) Browse largest 500 files (fzf)"
+echo "9) Exit"
 echo
 
 read -p "Choice: " choice
@@ -48,13 +59,24 @@ pause
 ;;
 
 3)
-read -p "Older than how many years? " years
+read -p "Older than how many years? (e.g. 2, 0.5, 1/12) " years
 
-days=$((years*365))
-
-find "$PHOTO_DIR" \
-    -type f \
-    -mtime +$days
+if mins=$(echo "$years" | awk '
+/^[0-9]+(\.[0-9]+)?$/ { printf "%d", $0 * 365.25 * 1440; ok=1; next }
+/^[0-9]+(\.[0-9]+)?\/[0-9]+(\.[0-9]+)?$/ {
+    split($0, a, "/")
+    if (a[2] + 0 == 0) exit 1
+    printf "%d", a[1] / a[2] * 365.25 * 1440
+    ok=1
+    next
+}
+END { if (!ok) exit 1 }'); then
+    find "$PHOTO_DIR" \
+        -type f \
+        -mmin +$mins
+else
+    echo "Invalid number. Use a number like 2, 0.5, or a fraction like 1/12."
+fi
 
 pause
 ;;
@@ -81,14 +103,25 @@ pause
 ;;
 
 5)
-read -p "Archive photos older than how many years? " years
+read -p "Archive photos older than how many years? (e.g. 2, 0.5, 1/12) " years
 
-days=$((years*365))
-
-find "$PHOTO_DIR" \
-    -type f \
-    -mtime +$days \
-    -exec mv -v {} "$ARCHIVE_DIR" \;
+if mins=$(echo "$years" | awk '
+/^[0-9]+(\.[0-9]+)?$/ { printf "%d", $0 * 365.25 * 1440; ok=1; next }
+/^[0-9]+(\.[0-9]+)?\/[0-9]+(\.[0-9]+)?$/ {
+    split($0, a, "/")
+    if (a[2] + 0 == 0) exit 1
+    printf "%d", a[1] / a[2] * 365.25 * 1440
+    ok=1
+    next
+}
+END { if (!ok) exit 1 }'); then
+    find "$PHOTO_DIR" \
+        -type f \
+        -mmin +$mins \
+        -exec mv -v {} "$ARCHIVE_DIR" \;
+else
+    echo "Invalid number. Use a number like 2, 0.5, or a fraction like 1/12."
+fi
 
 pause
 ;;
@@ -110,6 +143,61 @@ pause
 ;;
 
 7)
+echo
+echo "Month     Files        Size"
+echo "-------  ------  ----------"
+media_find "%TY-%Tm %s\n" |
+awk '
+function human(b,   i, u) {
+    split("B K M G T", u, " ")
+    for (i = 1; b >= 1024 && i < 5; i++) b /= 1024
+    return sprintf("%.1f%s", b, u[i])
+}
+{ count[$1]++; size[$1] += $2; tc++; ts += $2 }
+END {
+    for (m in count) printf "%-7s  %6d  %10s\n", m, count[m], human(size[m]) | "sort"
+    close("sort")
+    print "-------  ------  ----------"
+    printf "%-7s  %6d  %10s\n", "Total", tc, human(ts)
+}'
+pause
+;;
+
+8)
+if ! command -v fzf >/dev/null 2>&1; then
+    echo "fzf is not installed. Run: pkg install fzf"
+    pause
+else
+    LIST="$HOME/delete_list.txt"
+    media_find "%s\t%p\n" |
+    sort -nr |
+    head -500 |
+    awk -F'\t' '
+    function human(b,   i, u) {
+        split("B K M G T", u, " ")
+        for (i = 1; b >= 1024 && i < 5; i++) b /= 1024
+        return sprintf("%.1f%s", b, u[i])
+    }
+    { printf "%s\t%s\n", human($1), $2 }' |
+    fzf --multi \
+        --delimiter=$'\t' \
+        --header="Tab = mark, Enter = save marked files to $LIST, Esc = cancel" \
+        --preview='if command -v chafa >/dev/null 2>&1; then chafa -s 40x20 {2} 2>/dev/null; else ls -l {2}; fi' |
+    cut -f2 > "$LIST.tmp"
+
+    if [ -s "$LIST.tmp" ]; then
+        mv "$LIST.tmp" "$LIST"
+        echo "Saved $(wc -l < "$LIST") file(s) to $LIST"
+        echo "Use option 6 and enter that filename to delete them."
+    else
+        rm -f "$LIST.tmp"
+        echo "Nothing selected."
+    fi
+    pause
+fi
+;;
+
+9)
 exit
 ;;
 
